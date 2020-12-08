@@ -1,0 +1,139 @@
+version: '3.3'
+
+networks:
+  laravel:
+
+services:
+  builder:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: quick-store
+    container_name: builder
+    command: >
+      sh -c "chmod 755 -R /var/www/html/build.sh &&
+             chmod 777 -R /var/www/html/storage &&
+             /var/www/html/build.sh"
+    volumes:
+      - ./src:/var/www/html
+    depends_on:
+      - mysql
+      - app
+    networks:
+      - laravel
+
+  app:
+    image: quick-store
+    restart: unless-stopped
+    container_name: app
+    environment: 
+      MYSQL_USER: root
+      MYSQL_PASSWORD: secret
+      DB_HOST: mysql
+      DB_PASSWORD: secret
+      SESSION_DRIVER: redis
+      REDIS_HOST: redis
+    volumes: 
+      - ./src:/var/www/html
+    links:
+      - mysql
+    networks:
+      - laravel
+  nginx:
+    image: nginx:stable-alpine
+    container_name: nginx
+    ports:
+      - "80:80"
+    environment:
+      MYSQL_USER: root
+      MYSQL_PASSWORD: secret
+      DB_HOST: mysql
+      DB_PASSWORD: secret
+      SESSION_DRIVER: redis
+      REDIS_HOST: redis
+    volumes:
+      - ./src:/var/www/html
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - app
+      - php
+      - mysql
+      - phpmyadmin
+    links:
+      - mysql
+    networks:
+      - laravel
+
+  mysql:
+    image: mysql:latest
+    container_name: mysql
+    restart: unless-stopped
+    tty: true
+    ports:
+      - "3306:3306"
+    command: --init-file /data/application/init.sql
+    volumes:
+        - ./mysql/init.sql:/data/application/init.sql
+    environment:
+      MYSQL_ROOT_PASSWORD: secret
+      SERVICE_TAGS: dev
+      SERVICE_NAME: mysql
+    networks:
+      - laravel
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: phpmyadmin
+    restart: always
+    depends_on:
+      - mysql
+      - app
+    ports:
+      - 8081:80
+    environment:
+      PMA_HOST: mysql
+      PMA_ARBITRARY: 1
+    networks:
+      - laravel
+
+  php:
+    image: quick-store
+    container_name: php
+    volumes:
+      - ./src:/var/www/html
+      - ./php/local.ini:/usr/local/etc/php/conf.d/local.ini
+    ports:
+      - "9000:9000"
+    networks:
+      - laravel
+
+  composer:
+    image: composer:latest
+    container_name: composer
+    volumes:
+      - ./src:/var/www/html
+    working_dir: /var/www/html
+    depends_on:
+      - php
+    networks:
+      - laravel
+
+  npm:
+    image: node:latest
+    container_name: npm
+    volumes:
+      - ./src:/var/www/html
+    working_dir: /var/www/html
+    entrypoint: ['npm']
+
+  artisan:
+    image: quick-store
+    container_name: artisan
+    volumes:
+      - ./src:/var/www/html
+    depends_on:
+      - mysql
+    working_dir: /var/www/html
+    entrypoint: ['php', '/var/www/html/artisan']
+    networks:
+      - laravel
